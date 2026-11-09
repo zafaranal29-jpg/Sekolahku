@@ -1,0 +1,26 @@
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "sekolahku-app-58bd0",
+          "appId": "1:336111479777:android:57fb523f293d100b5dc0a0",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "sekolahku-app-58bd0",
+          "configurations": {
+            "android": "1:336111479777:android:57fb523f293d100b5dc0a0",
+            "web": "1:336111479777:web:e94fb9d2319a7c595dc0a0",
+            "windows": "1:336111479777:web:e16cddcb6b35872f5dc0a0"
+          }
+        }
+      }
+    }
+  },
+  "firestore": {
+    "rules": "firestore.rules"
+  }
+}

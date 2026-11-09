@@ -1,0 +1,148 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===================== Helpers =====================
+    function signedIn()  { return request.auth != null; }
+    function myUid()     { return request.auth.uid; }
+    function mePath()    { return /databases/$(database)/documents/users/$(myUid()); }
+    function meExists()  { return signedIn() && exists(mePath()); }
+    function me()        { return get(mePath()).data; }
+    function iAmActive() { return meExists() && me().active == true; }
+    function iAmAdmin()  { return iAmActive() && me().role == 'admin'; }
+    // True jika user adalah Ortu AKTIF yang terhubung ke studentId ini
+    // (relasi tersimpan di parent_links/{studentId}, doc id = studentId/NIS).
+    function iAmOrtuOf(studentId) {
+      return iAmActive()
+        && me().role == 'ortu'
+        && exists(/databases/$(database)/documents/parent_links/$(studentId))
+        && get(/databases/$(database)/documents/parent_links/$(studentId)).data.parentUid == myUid();
+    }
+
+    // ===================== users =====================
+    match /users/{uid} {
+      // Registrasi mandiri: hanya boleh membuat dokumen DIRI SENDIRI.
+      // Role dibatasi (admin & koperasi TIDAK bisa daftar sendiri), dan
+      // akun baru selalu NONAKTIF sampai di-ACC admin.
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.uid == uid
+        && request.resource.data.role in ['siswa', 'guru', 'ortu']
+        && request.resource.data.active == false;
+
+      // Baca: dokumen sendiri, atau admin aktif.
+      allow read: if signedIn()
+        && (request.auth.uid == uid || iAmAdmin());
+
+      // Update: admin aktif bebas mengubah apa saja. Pemilik akun hanya
+      // boleh mengubah 'name' / 'info' (tidak boleh active / role / ketuaOf / uid).
+      allow update: if signedIn() && (
+        iAmAdmin()
+        || (
+          request.auth.uid == uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'info'])
+        )
+      );
+
+      allow delete: if iAmAdmin();
+    }
+
+    // ===================== parent_links (hubungan Ortu <-> Siswa) =====================
+    // Doc id = studentId (NIS) supaya `iAmOrtuOf` bisa memverifikasi relasi
+    // Ortu–Siswa lewat get() deterministik (bukan query).
+    match /parent_links/{studentId} {
+      // Ortu hanya boleh menautkan DIRINYA sendiri ke seorang siswa,
+      // dan doc id harus sama dengan studentId yang ditulis.
+      allow create: if signedIn()
+        && request.resource.data.parentUid == myUid()
+        && request.resource.data.studentId == studentId;
+      // Baca: admin, atau Ortu pemilik link (dipakai query where parentUid == myUid).
+      allow read: if signedIn()
+        && (iAmAdmin() || resource.data.parentUid == myUid());
+      allow update, delete: if iAmAdmin();
+    }
+
+    // ===================== madings (Mading & Pengumuman) =====================
+    match /madings/{id} {
+      // Baca: semua pengguna aktif.
+      allow read: if iAmActive();
+      // Buat: admin bebas (langsung terbit); non-admin wajib 'Menunggu' & belum pin.
+      allow create: if signedIn() && iAmActive() && (
+        iAmAdmin() || (
+          request.resource.data.status == 'Menunggu'
+          && request.resource.data.pinned == false
+        )
+      );
+      // Update/delete: hanya admin (ACC / tolak / semat / hapus).
+      allow update, delete: if iAmAdmin();
+    }
+
+    // ===================== agendas (Kalender) =====================
+    match /agendas/{id} {
+      allow read: if iAmActive();
+      allow create, update, delete: if iAmAdmin();
+    }
+
+    // ===================== notifications =====================
+    match /notifications/{id} {
+      // Dibaca & ditulis klien (difilter per-user di sisi aplikasi).
+      allow read, create: if signedIn() && iAmActive();
+      // Update hanya untuk menandai sudah dibaca (field readBy).
+      allow update: if signedIn() && iAmActive()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readBy']);
+      allow delete: if iAmAdmin();
+    }
+
+    // ===================== koperasi: products & orders =====================
+    match /products/{id} {
+      allow read: if iAmActive();
+      allow create, update, delete:
+        if signedIn() && (iAmAdmin() || (iAmActive() && me().role == 'koperasi'));
+    }
+
+    match /orders/{id} {
+      allow read: if iAmActive();
+      allow create: if signedIn() && iAmActive();
+      allow update: if signedIn() && (iAmAdmin() || (iAmActive() && me().role == 'koperasi'));
+      allow delete: if iAmAdmin();
+    }
+
+    // ===================== pengaduan: complaints =====================
+    match /complaints/{id} {
+      allow read: if iAmActive();
+      allow create: if signedIn() && iAmActive();
+      allow update, delete: if iAmAdmin();
+    }
+
+    // ===================== lost & found: lf_items & lf_claims =====================
+    match /lf_items/{id} {
+      allow read: if iAmActive();
+      allow create: if signedIn() && iAmActive();
+      allow update, delete: if iAmAdmin();
+    }
+
+    match /lf_claims/{id} {
+      allow read: if iAmActive();
+      allow create: if signedIn() && iAmActive();
+      allow update, delete: if iAmAdmin();
+    }
+
+    // ===================== booking & aduan =====================
+    match /bookings/{id} {
+      allow read: if iAmActive();
+      allow create: if signedIn() && iAmActive();
+      allow update, delete: if iAmAdmin();
+    }
+
+    match /aduans/{id} {
+      allow read: if iAmActive();
+      allow create: if signedIn() && iAmActive();
+      allow update, delete: if iAmAdmin();
+    }
+
+    // ===================== Belum dimigrasi =====================
+    // Koleksi lain (students, grades,) masih
+    // memakai data demo in-memory. Aturannya ditambahkan saat tiap modul
+    // dimigrasi ke Firestore. Apa pun yang tidak tercantum = DENY (aman).
+  }
+}
