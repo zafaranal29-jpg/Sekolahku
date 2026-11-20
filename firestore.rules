@@ -18,59 +18,57 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/parent_links/$(studentId))
         && get(/databases/$(database)/documents/parent_links/$(studentId)).data.parentUid == myUid();
     }
-    // Bootstrap admin pertama: hanya mengizinkan pembuatan akun admin dengan
-    // email hardcoded ini (dipakai `bootstrapAdmin` saat first-run).
-    function isBootstrapAdmin(uid) {
-      return request.resource.data.uid == uid
-        && request.resource.data.role == 'admin'
-        && request.resource.data.active == true
-        && request.resource.data.email == 'admin@sekolahku.id';
+
+    // ---- Helper akademik (revisi Wali Kelas) ----
+    function iAmGuru()   { return iAmActive() && me().role == 'guru'; }
+    function iAmWali()   { return iAmActive() && me().role == 'waliKelas'; }
+    // Wali kelas AKTIF yang kelas binaannya (users/{uid}.waliKelas) == kelas.
+    function iAmWaliOf(kelas) { return iAmWali() && me().get('waliKelas', '') == kelas; }
+    function iAmStaff()  { return iAmAdmin() || iAmGuru() || iAmWali(); }
+    // Siswa AKTIF yang NIS-nya (users/{uid}.nis) == nis.
+    function iAmSiswa(nis) { return iAmActive() && me().role == 'siswa' && me().get('nis', '') == nis; }
+    function studentPath(nis) { return /databases/$(database)/documents/students/$(nis); }
+    // True jika students/{nis} ada dan kelasnya == kelas (mencegah menulis
+    // nilai/absensi dengan kelas palsu).
+    function studentInKelas(nis, kelas) {
+      return exists(studentPath(nis)) && get(studentPath(nis)).data.kelas == kelas;
+    }
+    // Siswa / ortu yang boleh melihat data kelas tertentu (untuk jadwal).
+    function iAmSiswaOfKelas(kelas) {
+      return iAmActive() && me().role == 'siswa' && me().get('kelas', '') == kelas;
+    }
+    function iAmOrtuOfKelas(kelas) {
+      return iAmActive() && me().role == 'ortu'
+        && iAmOrtuOf(me().get('nisAnak', '-'))
+        && studentInKelas(me().get('nisAnak', '-'), kelas);
     }
 
     // ===================== users =====================
     match /users/{uid} {
       // Registrasi mandiri: hanya boleh membuat dokumen DIRI SENDIRI.
-      // Role dibatasi (admin & koperasi TIDAK bisa daftar sendiri), dan
-      // akun baru selalu NONAKTIF sampai di-ACC admin.
+      // Role dibatasi (ADMIN tidak bisa daftar sendiri; koperasi & waliKelas
+      // boleh mendaftar tetapi tetap NONAKTIF sampai diverifikasi admin),
+      // saldo awal 0, dan tidak boleh langsung menetapkan diri ketua ekskul.
       allow create: if signedIn()
         && request.auth.uid == uid
-        && (
-          // Registrasi mandiri: siswa/guru/ortu, selalu nonaktif.
-          (request.resource.data.uid == uid
-            && request.resource.data.role in ['siswa', 'guru', 'ortu']
-            && request.resource.data.active == false)
-          // Bootstrap admin pertama (email hardcoded, aktif).
-          || isBootstrapAdmin(uid)
-        );
+        && request.resource.data.uid == uid
+        && request.resource.data.role in ['siswa', 'guru', 'ortu', 'koperasi', 'waliKelas']
+        && request.resource.data.active == false
+        && request.resource.data.get('saldo', 0) == 0
+        && !('ketuaOf' in request.resource.data);
 
       // Baca: dokumen sendiri, atau admin aktif.
       allow read: if signedIn()
         && (request.auth.uid == uid || iAmAdmin());
 
-      // Update: admin aktif bebas mengubah apa saja. Pemilik akun boleh:
-      // - mengubah 'name' / 'info' (profil)
-      // - top-up saldo (bertambah, maks +500.000 per transaksi)
-      // - bayar pakai saldo (berkurang, tidak boleh negatif)
-      // CATATAN: wallet ini client-side — cukup untuk demo, TIDAK untuk uang
-      // sungguhan. Produksi: pindahkan top-up ke admin/koperasi atau pakai
-      // Cloud Function transaksi agar tidak bisa dipalsukan klien.
+      // Update: admin aktif bebas mengubah apa saja. Pemilik akun hanya
+      // boleh mengubah 'name' / 'info' (tidak boleh active / role / ketuaOf /
+      // uid / nis / kelas / waliKelas / nisAnak) -> role tidak bisa dinaikkan sendiri.
       allow update: if signedIn() && (
         iAmAdmin()
         || (
           request.auth.uid == uid
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'info'])
-        )
-        || (
-          request.auth.uid == uid
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['saldo'])
-          && request.resource.data.saldo > resource.data.saldo
-          && request.resource.data.saldo - resource.data.saldo <= 500000
-        )
-        || (
-          request.auth.uid == uid
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['saldo'])
-          && request.resource.data.saldo < resource.data.saldo
-          && request.resource.data.saldo >= 0
         )
       );
 
@@ -90,37 +88,6 @@ service cloud.firestore {
       allow read: if signedIn()
         && (iAmAdmin() || resource.data.parentUid == myUid());
       allow update, delete: if iAmAdmin();
-    }
-
-    // ===================== akademik: students & grades =====================
-    match /students/{studentId} {
-      // Baca: admin, guru (butuh daftar/pilihan siswa), Ortu pemilik anak,
-      // atau Siswa yang membaca datanya sendiri (via NIS).
-      allow read: if signedIn() && iAmActive() && (
-        iAmAdmin() || me().role == 'guru' || iAmOrtuOf(studentId)
-        || (me().role == 'siswa' && me().nis == studentId)
-      );
-      // Tulis: hanya admin (termasuk seeding). Guru menginput nilai lewat `grades`.
-      allow create, update, delete: if iAmAdmin();
-    }
-
-    match /grades/{gradeId} {
-      // Baca: admin, guru, Ortu dari siswa yang nilainya dibaca, atau Siswa
-      // yang membaca nilainya sendiri (via NIS).
-      allow read: if signedIn() && iAmActive() && (
-        iAmAdmin() || me().role == 'guru' || iAmOrtuOf(resource.data.studentId)
-        || (me().role == 'siswa' && me().nis == resource.data.studentId)
-      );
-      // Buat: admin atau guru (guru menginput nilai siswa).
-      allow create: if signedIn() && (iAmAdmin() || (iAmActive() && me().role == 'guru'));
-      allow update, delete: if iAmAdmin();
-    }
-
-    // ===================== guru_relations (wali kelas & mapel) =====================
-    match /guru_relations/{guruName} {
-      // Dibaca guru & admin untuk menentukan siswa binaan. Diatur admin.
-      allow read: if iAmAdmin() || (iAmActive() && me().role == 'guru');
-      allow create, update, delete: if iAmAdmin();
     }
 
     // ===================== madings (Mading & Pengumuman) =====================
@@ -175,14 +142,6 @@ service cloud.firestore {
       allow update, delete: if iAmAdmin();
     }
 
-    // ===================== moderasi: reports =====================
-    match /reports/{id} {
-      // Admin membaca & memproses laporan konten; user aktif bisa melaporkan.
-      allow read: if iAmAdmin();
-      allow create: if signedIn() && iAmActive();
-      allow update, delete: if iAmAdmin();
-    }
-
     // ===================== lost & found: lf_items & lf_claims =====================
     match /lf_items/{id} {
       allow read: if iAmActive();
@@ -209,10 +168,92 @@ service cloud.firestore {
       allow update, delete: if iAmAdmin();
     }
 
-    // ===================== Catatan =====================
-    // `students`, `grades`, & `parent_links` sudah ter-cover di atas.
-    // UI akademik (Ortu/Guru) masih membaca RelationsService in-memory;
-    // migrasi view ke Firebase dilakukan terpisah. Apa pun yang tidak
-    // tercantum = DENY (aman).
+    // ===================== students (data master siswa) =====================
+    // Doc id = NIS. Ditulis admin (otomatis saat mengaktifkan siswa / mengatur
+    // NIS & kelas). Dibaca guru/wali kelas/admin, siswa itu sendiri, dan ortunya.
+    match /students/{nis} {
+      allow read: if iAmStaff() || iAmSiswa(nis) || iAmOrtuOf(nis);
+      allow write: if iAmAdmin();
+    }
+
+    // ===================== nilai (guru input -> wali kelas konfirmasi) =====================
+    match /nilai/{id} {
+      // Baca:
+      // - admin
+      // - guru: nilai yang ia input sendiri (pantau status) + semua yang Terkonfirmasi
+      // - wali kelas: semua nilai di kelas binaannya (untuk dikonfirmasi)
+      // - siswa & ortu: HANYA nilai Terkonfirmasi milik siswa/anak tsb
+      allow read: if iAmAdmin()
+        || (iAmGuru() && resource.data.guruUid == myUid())
+        || ((iAmGuru() || iAmWali()) && resource.data.status == 'Terkonfirmasi')
+        || iAmWaliOf(resource.data.kelas)
+        || (resource.data.status == 'Terkonfirmasi'
+            && (iAmSiswa(resource.data.nis) || iAmOrtuOf(resource.data.nis)));
+
+      // Buat: guru aktif, atas namanya sendiri, status WAJIB menunggu,
+      // nilai 0-100, dan kelas harus sama dengan kelas siswa di students/{nis}.
+      allow create: if (iAmGuru() || iAmAdmin())
+        && request.resource.data.keys().hasOnly(['nis', 'studentName', 'kelas', 'mapel', 'jenis',
+             'semester', 'nilai', 'catatan', 'guruUid', 'guruName', 'status', 'createdAt'])
+        && request.resource.data.guruUid == myUid()
+        && request.resource.data.status == 'Menunggu konfirmasi'
+        && request.resource.data.nilai is number
+        && request.resource.data.nilai >= 0
+        && request.resource.data.nilai <= 100
+        && request.resource.data.mapel is string
+        && request.resource.data.mapel.size() > 0
+        && studentInKelas(request.resource.data.nis, request.resource.data.kelas);
+
+      // Ubah status: hanya wali kelas dari kelas nilai tsb selama nilai masih
+      // menunggu (admin boleh mengoreksi kapan saja). Yang boleh berubah hanya
+      // field konfirmasi; angka nilai tidak bisa diubah.
+      allow update: if (iAmAdmin()
+                        || (iAmWaliOf(resource.data.kelas)
+                            && resource.data.status == 'Menunggu konfirmasi'))
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'alasanTolak', 'confirmedBy', 'confirmedAt'])
+        && request.resource.data.status in ['Terkonfirmasi', 'Ditolak'];
+
+      // Hapus: admin, atau guru pemilik selama belum terkonfirmasi.
+      allow delete: if iAmAdmin()
+        || (iAmGuru() && resource.data.guruUid == myUid()
+            && resource.data.status != 'Terkonfirmasi');
+    }
+
+    // ===================== jadwal (jadwal pelajaran per kelas) =====================
+    match /jadwal/{id} {
+      allow read: if iAmStaff()
+        || iAmSiswaOfKelas(resource.data.kelas)
+        || iAmOrtuOfKelas(resource.data.kelas);
+      allow create: if (iAmWaliOf(request.resource.data.kelas) || iAmAdmin())
+        && request.resource.data.hari in ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu']
+        && request.resource.data.mapel is string
+        && request.resource.data.jamMulai is string
+        && request.resource.data.jamSelesai is string;
+      // Update: tidak boleh memindahkan jadwal ke / dari kelas lain.
+      allow update: if (iAmAdmin() || (iAmWaliOf(resource.data.kelas)
+                                        && request.resource.data.kelas == resource.data.kelas))
+        && request.resource.data.hari in ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+      allow delete: if iAmWaliOf(resource.data.kelas) || iAmAdmin();
+    }
+
+    // ===================== absensi (doc id = {nis}_{yyyy-MM-dd}) =====================
+    match /absensi/{absenId} {
+      allow read: if iAmAdmin()
+        || iAmWaliOf(resource.data.kelas)
+        || iAmSiswa(resource.data.nis)
+        || iAmOrtuOf(resource.data.nis);
+      // Tulis (create/update lewat set()): wali kelas dari kelas siswa tsb, atau admin.
+      allow create, update: if (iAmWaliOf(request.resource.data.kelas) || iAmAdmin())
+        && absenId == request.resource.data.nis + '_' + request.resource.data.tanggal
+        && request.resource.data.status in ['Hadir', 'Sakit', 'Izin', 'Alpa']
+        && studentInKelas(request.resource.data.nis, request.resource.data.kelas)
+        && (resource == null || resource.data.kelas == request.resource.data.kelas || iAmAdmin());
+      allow delete: if iAmWaliOf(resource.data.kelas) || iAmAdmin();
+    }
+
+    // ===================== Belum dimigrasi =====================
+    // Koleksi lama `grades` tidak dipakai lagi (diganti `nilai`). Apa pun
+    // yang tidak tercantum = DENY (aman).
   }
 }
