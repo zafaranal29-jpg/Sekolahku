@@ -6,6 +6,7 @@ import 'package:sekolahku/models/role.dart';
 import 'package:sekolahku/models/session.dart';
 import 'package:sekolahku/services/firebase_service.dart' as firebase_service;
 import 'package:sekolahku/services/notif_service.dart';
+import 'package:sekolahku/widgets/photo_picker.dart';
 import 'package:sekolahku/widgets/widgets.dart';
 
 (String, Color) catStyle(String cat) => switch (cat) {
@@ -183,6 +184,16 @@ class _MadingDetailState extends State<MadingDetail> {
           style: const TextStyle(color: kMuted, fontSize: 12)),
       const SizedBox(height: 12),
       Text(m.body, style: const TextStyle(height: 1.6)),
+      if (m.imageUrl != null) ...[
+        const SizedBox(height: 12),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: Image.network(m.imageUrl!, width: double.infinity, fit: BoxFit.cover,
+              errorBuilder: (c, e, s) => const SizedBox(
+                  height: 140,
+                  child: Center(child: Text('⚠️ Gambar gagal dimuat')))),
+        ),
+      ],
       const SizedBox(height: 12),
       if (m.status == 'Menunggu')
         const Card2(
@@ -233,6 +244,7 @@ class _MadingFormState extends State<MadingForm> {
   final kelas = TextEditingController(text: 'XI IPA 1 · XI IPA 2 · XI IPA 3');
   int cat = 0, target = 0;
   bool pin = false, push = false;
+  String? photoUrl;
   static const targets = ['Semua', 'Per kelas', 'Ekskul', 'Guru'];
 
   bool get isAdmin => Session.role == Role.admin;
@@ -281,6 +293,7 @@ class _MadingFormState extends State<MadingForm> {
       push: isAdmin && push,
       reqPin: !isAdmin && pin,
       reqPush: !isAdmin && push,
+      imageUrl: photoUrl,
     );
     await firebase_service.FirebaseService.i.addMading(m);
     if (!mounted) return;
@@ -312,10 +325,7 @@ class _MadingFormState extends State<MadingForm> {
             Chips(cats, cat, (i) => setState(() => cat = i)),
             const SizedBox(height: 8),
             if (!isPeng)
-              OutlinedButton.icon(
-                  onPressed: () => toast(c, 'Pilih foto (tambahkan image_picker di versi lanjut)'),
-                  icon: const Icon(Icons.add_a_photo_outlined),
-                  label: const Text('Tambah foto / lampiran')),
+              PhotoPicker(folder: 'mading', onChanged: (u) => setState(() => photoUrl = u)),
             if (isPeng) ...[
               const Text('Target audiens', style: TextStyle(color: kMuted, fontWeight: FontWeight.w700)),
               const SizedBox(height: 6),

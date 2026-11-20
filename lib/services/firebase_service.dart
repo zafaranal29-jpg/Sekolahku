@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart' hide Order;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart' show Color;
 
@@ -15,6 +16,7 @@ import 'package:sekolahku/models/mading.dart';
 import 'package:sekolahku/models/notif.dart';
 import 'package:sekolahku/models/order.dart';
 import 'package:sekolahku/models/product.dart';
+import 'package:sekolahku/models/report.dart';
 import 'package:sekolahku/models/role.dart';
 import 'package:sekolahku/models/session.dart';
 import 'package:sekolahku/models/user.dart';
@@ -28,6 +30,7 @@ class FirebaseService {
 
   FirebaseAuth get _auth => FirebaseAuth.instance;
   FirebaseFirestore get _db => FirebaseFirestore.instance;
+  FirebaseStorage get _storage => FirebaseStorage.instance;
 
   FirebaseAuth get auth => _auth;
   FirebaseFirestore get db => _db;
@@ -66,6 +69,9 @@ class FirebaseService {
       'active': false, // semua akun baru nonaktif, menunggu ACC admin
       'saldo': 0,
       'createdAt': FieldValue.serverTimestamp(),
+      // NIS siswa disimpan supaya siswa bisa membaca nilai dirinya sendiri.
+      if (role == Role.siswa && studentNis != null && studentNis.isNotEmpty)
+        'nis': studentNis.trim(),
     };
 
     await _db.collection('users').doc(uid).set(userDoc);
@@ -119,13 +125,15 @@ class FirebaseService {
     );
     final name = data['name'] as String? ?? 'Pengguna';
     final info = data['info'] as String? ?? roleLabel(role);
+    final nis = data['nis'] as String?;
 
-    final appUser = AppUser(name, info, role, active);
+    final appUser = AppUser(name, info, role, active, nis: nis);
 
     // Set sesi saat ini
     Session.role = role;
     Session.name = name;
     Session.user = appUser;
+    Session.nis = nis;
 
     return appUser;
   }
@@ -135,38 +143,31 @@ class FirebaseService {
     await _auth.signOut();
   }
 
-  /// Bootstrap (dev): buat akun ADMIN pertama bila belum ada admin aktif.
-  /// Hanya jalan saat Firestore rules masih terbuka (test mode). Dengan rules
-  /// produksi (terkunci), akun admin dibuat manual via Firebase Console (satu
-  /// kali). Aman diulang (idempoten).
+  /// Bootstrap: buat akun admin pertama (first-run) lalu seed data awal.
+  ///
+  /// Idempoten — jika email admin sudah terdaftar, langsung berhenti.
+  /// Bekerja di bawah rules produksi lewat aturan khusus `isBootstrapAdmin`
+  /// (hanya mengizinkan admin pertama dengan email hardcoded ini). Untuk
+  /// produksi nyata, sebaiknya admin dibuat manual via Console dan rule
+  /// bootstrap ini dihapus.
   Future<bool> bootstrapAdmin({
     String email = 'admin@sekolahku.id',
     String password = 'AdminSekolahku2026',
   }) async {
-    // 1. Sudah ada admin aktif? Kalau ya, tidak usah buat lagi.
-    final admins = await _db
-        .collection('users')
-        .where('role', isEqualTo: Role.admin.name)
-        .limit(1)
-        .get();
-    if (admins.docs.any((d) => d.data()['active'] == true)) {
-      return false;
-    }
-
-    // 2. Buat akun Auth (atau pakai yang sudah ada bila email terdaftar).
-    String uid;
+    // 1. Buat akun Auth admin; kalau email sudah ada, admin sudah pernah
+    //    di-bootstrap → tidak usah lanjut.
+    UserCredential cred;
     try {
-      final cred = await _auth.createUserWithEmailAndPassword(
+      cred = await _auth.createUserWithEmailAndPassword(
           email: email, password: password);
-      uid = cred.user!.uid;
     } on FirebaseAuthException catch (e) {
-      if (e.code != 'email-already-in-use') rethrow;
-      final cred = await _auth.signInWithEmailAndPassword(
-          email: email, password: password);
-      uid = cred.user!.uid;
+      if (e.code == 'email-already-in-use') return false;
+      rethrow;
     }
+    final uid = cred.user!.uid;
 
-    // 3. Tulis dokumen admin yang SUDAH AKTIF (role admin).
+    // 2. Tulis dokumen admin yang SUDAH AKTIF (role admin). Diizinkan rules
+    //    lewat branch `isBootstrapAdmin`.
     await _db.collection('users').doc(uid).set({
       'uid': uid,
       'email': email,
@@ -176,7 +177,11 @@ class FirebaseService {
       'active': true,
       'saldo': 0,
       'createdAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+    });
+
+    // 3. Seed data referensi awal (siswa, nilai, produk, relasi guru) sebagai
+    //    admin, selagi sesi admin-nya masih aktif.
+    await seedInitialDataIfEmpty();
 
     // Jangan biarkan sesi admin tertinggal dari proses bootstrap.
     await _auth.signOut();
@@ -189,6 +194,7 @@ class FirebaseService {
   /// Tanpa `orderBy` Firestore supaya setiap dokumen selalu tampil (agar tidak
   /// ada dokumen yang diam-diam hilang saat field pengurutnya belum lengkap).
   Stream<List<AppUser>> usersStream() {
+    if (!_fbReady) return const Stream.empty();
     return _db.collection('users').snapshots().map((snap) {
       final list = snap.docs.map(_userFromDoc).toList();
       list.sort((a, b) => a.name.compareTo(b.name));
@@ -210,6 +216,7 @@ class FirebaseService {
       d['active'] == true,
       ketuaOf: d['ketuaOf'] as String?,
       uid: doc.id,
+      nis: d['nis'] as String?,
     );
   }
 
@@ -257,6 +264,7 @@ class FirebaseService {
       push: d['push'] == true,
       reqPin: d['reqPin'] == true,
       reqPush: d['reqPush'] == true,
+      imageUrl: d['imageUrl'] as String?,
     );
   }
 
@@ -276,6 +284,7 @@ class FirebaseService {
         'push': m.push,
         'reqPin': m.reqPin,
         'reqPush': m.reqPush,
+        if (m.imageUrl != null) 'imageUrl': m.imageUrl,
       };
 
   Future<void> addMading(Mading m) {
@@ -496,6 +505,7 @@ class FirebaseService {
       d['reply'] as String? ?? '',
       d['owner'] as String? ?? '',
       fsId: doc.id,
+      imageUrl: d['imageUrl'] as String?,
     );
   }
 
@@ -509,6 +519,7 @@ class FirebaseService {
       'pic': c.pic,
       'reply': c.reply,
       'owner': c.owner,
+      if (c.imageUrl != null) 'imageUrl': c.imageUrl,
       'createdAt': FieldValue.serverTimestamp(),
     });
   }
@@ -543,6 +554,7 @@ class FirebaseService {
       Color(d['bgColor'] as int? ?? kSoft.toARGB32()),
       d['status'] as String? ?? 'Menunggu validasi',
       fsId: doc.id,
+      imageUrl: d['imageUrl'] as String?,
     );
   }
 
@@ -558,6 +570,7 @@ class FirebaseService {
       'owner': it.owner,
       'bgColor': it.bg.toARGB32(),
       'status': it.status,
+      if (it.imageUrl != null) 'imageUrl': it.imageUrl,
       'createdAt': FieldValue.serverTimestamp(),
     });
   }
@@ -699,6 +712,36 @@ class FirebaseService {
         .update({'status': a.status, 'reply': a.reply});
   }
 
+  // ===================== REPORTS (MODERASI KONTEN) =====================
+
+  /// Stream laporan konten untuk moderasi admin. Baca hanya oleh admin
+  /// (diatur di Security Rules `reports`).
+  Stream<List<Report>> reportsStream() {
+    if (!_fbReady) return const Stream.empty();
+    return _db
+        .collection('reports')
+        .snapshots()
+        .map((snap) => snap.docs.map(_reportFromDoc).toList());
+  }
+
+  Report _reportFromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
+    final d = doc.data() ?? const <String, dynamic>{};
+    return Report(
+      d['emoji'] as String? ?? '🚩',
+      d['title'] as String? ?? '',
+      d['sub'] as String? ?? '',
+      d['quote'] as String? ?? '',
+      (d['count'] as num?)?.toInt() ?? 0,
+      d['status'] as String? ?? 'open',
+      doc.id,
+    );
+  }
+
+  /// Admin mengubah status laporan (open / hidden / ignored).
+  Future<void> updateReportStatus(Report r, String status) {
+    return _db.collection('reports').doc(r.id!).update({'status': status});
+  }
+
   // ===================== SALDO (per-user wallet) =====================
 
   Stream<int> mySaldoStream() {
@@ -753,29 +796,111 @@ class FirebaseService {
     }
   }
 
-  /// Ambil seluruh nilai seorang siswa
+  /// Parsing dokumen `grades` menjadi [GradeRecord], terurut tanggal terbaru.
+  List<GradeRecord> _gradesFromDocs(
+      Iterable<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
+    final list = docs.map((d) {
+      final m = d.data();
+      final ts = m['tanggal'] as Timestamp?;
+      final t = ts != null ? ts.toDate() : DateTime.now();
+      return GradeRecord(
+        m['mapel'] ?? '',
+        m['jenis'] ?? '',
+        m['semester'] ?? '',
+        (m['nilai'] as num?)?.toDouble() ?? 0.0,
+        t,
+      );
+    }).toList();
+    list.sort((a, b) => b.tanggal.compareTo(a.tanggal));
+    return list;
+  }
+
+  /// Ambil seluruh nilai seorang siswa (sekali ambil), terurut terbaru.
   Future<List<GradeRecord>> getGrades(String studentId) async {
     try {
       final snap = await _db
           .collection('grades')
           .where('studentId', isEqualTo: studentId)
-          .orderBy('tanggal', descending: true)
           .get();
+      return _gradesFromDocs(snap.docs);
+    } catch (e) {
+      debugPrint('Error getGrades: $e');
+      return [];
+    }
+  }
 
-      return snap.docs.map((d) {
-        final m = d.data();
+  /// Stream nilai seorang siswa (reaktif — mencerminkan input nilai guru).
+  Stream<List<GradeRecord>> gradesStream(String studentId) {
+    if (!_fbReady) return const Stream.empty();
+    return _db
+        .collection('grades')
+        .where('studentId', isEqualTo: studentId)
+        .snapshots()
+        .map((snap) => _gradesFromDocs(snap.docs));
+  }
+
+  /// Semua siswa + nilainya (sekali ambil; data referensi sekolah).
+  /// Dipakai guru & admin untuk daftar/pilihan siswa.
+  Future<List<Student>> students() async {
+    try {
+      final sSnap = await _db.collection('students').get();
+      final gSnap = await _db.collection('grades').get();
+      final byStudent = <String, List<GradeRecord>>{};
+      for (final g in gSnap.docs) {
+        final m = g.data();
         final ts = m['tanggal'] as Timestamp?;
-        final t = ts != null ? ts.toDate() : DateTime.now();
-        return GradeRecord(
+        final r = GradeRecord(
           m['mapel'] ?? '',
           m['jenis'] ?? '',
           m['semester'] ?? '',
           (m['nilai'] as num?)?.toDouble() ?? 0.0,
-          t,
+          ts?.toDate() ?? DateTime.now(),
+        );
+        byStudent.putIfAbsent(m['studentId'] as String? ?? '', () => []).add(r);
+      }
+      final list = sSnap.docs.map((doc) {
+        final d = doc.data();
+        final grades = byStudent[doc.id] ?? const <GradeRecord>[];
+        grades.sort((a, b) => b.tanggal.compareTo(a.tanggal));
+        return Student(doc.id, d['name'] ?? '', d['kelas'] ?? '', grades);
+      }).toList()
+        ..sort((a, b) => a.name.compareTo(b.name));
+      return list;
+    } catch (e) {
+      debugPrint('Error students: $e');
+      return [];
+    }
+  }
+
+  /// Satu siswa (berdasarkan NIS/doc id) + nilainya. Untuk siswa melihat
+  /// nilainya sendiri (lewat `Session.nis`).
+  Future<Student?> getStudent(String studentId) async {
+    try {
+      final doc = await _db.collection('students').doc(studentId).get();
+      if (!doc.exists) return null;
+      final d = doc.data()!;
+      final grades = await getGrades(studentId);
+      return Student(studentId, d['name'] ?? '', d['kelas'] ?? '', grades);
+    } catch (e) {
+      debugPrint('Error getStudent: $e');
+      return null;
+    }
+  }
+
+  /// Relasi guru (wali kelas & mapel) dari Firestore.
+  Future<List<GuruRelation>> guruRelations() async {
+    try {
+      final snap = await _db.collection('guru_relations').get();
+      return snap.docs.map((d) {
+        final m = d.data();
+        return GuruRelation(
+          m['guruName'] as String? ?? d.id,
+          waliKelas: m['waliKelas'] as String?,
+          mapel: (m['mapel'] as List?)?.map((e) => e as String).toList() ?? const [],
         );
       }).toList();
     } catch (e) {
-      debugPrint('Error getGrades: $e');
+      debugPrint('Error guruRelations: $e');
       return [];
     }
   }
@@ -800,6 +925,28 @@ class FirebaseService {
     });
   }
 
+  // ===================== STORAGE (UPLOAD FOTO) =====================
+
+  /// Unggah gambar ke Firebase Storage (`uploads/{uid}/{folder}/...`)
+  /// lalu kembalikan URL downloadnya. `null` berarti upload gagal.
+  Future<String?> uploadImage({
+    required String folder,
+    required String filename,
+    required Uint8List bytes,
+  }) async {
+    try {
+      final uid = _auth.currentUser?.uid ?? 'anonymous';
+      final safeName = filename.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
+      final ref = _storage.ref(
+          'uploads/$uid/$folder/${DateTime.now().millisecondsSinceEpoch}_$safeName');
+      final task = await ref.putData(bytes);
+      return await task.ref.getDownloadURL();
+    } catch (e) {
+      debugPrint('uploadImage error: $e');
+      return null;
+    }
+  }
+
   // ===================== SEEDER DATABASE PERDANA =====================
   /// Membantu mengisi database Firestore pertama kali jika masih kosong.
   Future<void> seedInitialDataIfEmpty() async {
@@ -820,10 +967,15 @@ class FirebaseService {
         await _db.collection('students').doc(s['id']).set(s);
       }
 
-      // 2. Parent Link
-      await _db.collection('parent_links').add({
-        'parentName': 'Pak Hendra Johnson',
-        'studentId': '2024-0153',
+      // 2. Guru relations (wali kelas & mapel yang diampu)
+      await _db.collection('guru_relations').doc('Bu Rina Wulandari').set({
+        'guruName': 'Bu Rina Wulandari',
+        'waliKelas': 'XI IPA 3',
+        'mapel': ['Matematika'],
+      });
+      await _db.collection('guru_relations').doc('Bu Maya').set({
+        'guruName': 'Bu Maya',
+        'mapel': ['Kimia'],
       });
 
       // 3. Grades Starter

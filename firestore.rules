@@ -18,6 +18,14 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/parent_links/$(studentId))
         && get(/databases/$(database)/documents/parent_links/$(studentId)).data.parentUid == myUid();
     }
+    // Bootstrap admin pertama: hanya mengizinkan pembuatan akun admin dengan
+    // email hardcoded ini (dipakai `bootstrapAdmin` saat first-run).
+    function isBootstrapAdmin(uid) {
+      return request.resource.data.uid == uid
+        && request.resource.data.role == 'admin'
+        && request.resource.data.active == true
+        && request.resource.data.email == 'admin@sekolahku.id';
+    }
 
     // ===================== users =====================
     match /users/{uid} {
@@ -26,21 +34,43 @@ service cloud.firestore {
       // akun baru selalu NONAKTIF sampai di-ACC admin.
       allow create: if signedIn()
         && request.auth.uid == uid
-        && request.resource.data.uid == uid
-        && request.resource.data.role in ['siswa', 'guru', 'ortu']
-        && request.resource.data.active == false;
+        && (
+          // Registrasi mandiri: siswa/guru/ortu, selalu nonaktif.
+          (request.resource.data.uid == uid
+            && request.resource.data.role in ['siswa', 'guru', 'ortu']
+            && request.resource.data.active == false)
+          // Bootstrap admin pertama (email hardcoded, aktif).
+          || isBootstrapAdmin(uid)
+        );
 
       // Baca: dokumen sendiri, atau admin aktif.
       allow read: if signedIn()
         && (request.auth.uid == uid || iAmAdmin());
 
-      // Update: admin aktif bebas mengubah apa saja. Pemilik akun hanya
-      // boleh mengubah 'name' / 'info' (tidak boleh active / role / ketuaOf / uid).
+      // Update: admin aktif bebas mengubah apa saja. Pemilik akun boleh:
+      // - mengubah 'name' / 'info' (profil)
+      // - top-up saldo (bertambah, maks +500.000 per transaksi)
+      // - bayar pakai saldo (berkurang, tidak boleh negatif)
+      // CATATAN: wallet ini client-side — cukup untuk demo, TIDAK untuk uang
+      // sungguhan. Produksi: pindahkan top-up ke admin/koperasi atau pakai
+      // Cloud Function transaksi agar tidak bisa dipalsukan klien.
       allow update: if signedIn() && (
         iAmAdmin()
         || (
           request.auth.uid == uid
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'info'])
+        )
+        || (
+          request.auth.uid == uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['saldo'])
+          && request.resource.data.saldo > resource.data.saldo
+          && request.resource.data.saldo - resource.data.saldo <= 500000
+        )
+        || (
+          request.auth.uid == uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['saldo'])
+          && request.resource.data.saldo < resource.data.saldo
+          && request.resource.data.saldo >= 0
         )
       );
 
@@ -60,6 +90,37 @@ service cloud.firestore {
       allow read: if signedIn()
         && (iAmAdmin() || resource.data.parentUid == myUid());
       allow update, delete: if iAmAdmin();
+    }
+
+    // ===================== akademik: students & grades =====================
+    match /students/{studentId} {
+      // Baca: admin, guru (butuh daftar/pilihan siswa), Ortu pemilik anak,
+      // atau Siswa yang membaca datanya sendiri (via NIS).
+      allow read: if signedIn() && iAmActive() && (
+        iAmAdmin() || me().role == 'guru' || iAmOrtuOf(studentId)
+        || (me().role == 'siswa' && me().nis == studentId)
+      );
+      // Tulis: hanya admin (termasuk seeding). Guru menginput nilai lewat `grades`.
+      allow create, update, delete: if iAmAdmin();
+    }
+
+    match /grades/{gradeId} {
+      // Baca: admin, guru, Ortu dari siswa yang nilainya dibaca, atau Siswa
+      // yang membaca nilainya sendiri (via NIS).
+      allow read: if signedIn() && iAmActive() && (
+        iAmAdmin() || me().role == 'guru' || iAmOrtuOf(resource.data.studentId)
+        || (me().role == 'siswa' && me().nis == resource.data.studentId)
+      );
+      // Buat: admin atau guru (guru menginput nilai siswa).
+      allow create: if signedIn() && (iAmAdmin() || (iAmActive() && me().role == 'guru'));
+      allow update, delete: if iAmAdmin();
+    }
+
+    // ===================== guru_relations (wali kelas & mapel) =====================
+    match /guru_relations/{guruName} {
+      // Dibaca guru & admin untuk menentukan siswa binaan. Diatur admin.
+      allow read: if iAmAdmin() || (iAmActive() && me().role == 'guru');
+      allow create, update, delete: if iAmAdmin();
     }
 
     // ===================== madings (Mading & Pengumuman) =====================
@@ -114,6 +175,14 @@ service cloud.firestore {
       allow update, delete: if iAmAdmin();
     }
 
+    // ===================== moderasi: reports =====================
+    match /reports/{id} {
+      // Admin membaca & memproses laporan konten; user aktif bisa melaporkan.
+      allow read: if iAmAdmin();
+      allow create: if signedIn() && iAmActive();
+      allow update, delete: if iAmAdmin();
+    }
+
     // ===================== lost & found: lf_items & lf_claims =====================
     match /lf_items/{id} {
       allow read: if iAmActive();
@@ -140,9 +209,10 @@ service cloud.firestore {
       allow update, delete: if iAmAdmin();
     }
 
-    // ===================== Belum dimigrasi =====================
-    // Koleksi lain (students, grades,) masih
-    // memakai data demo in-memory. Aturannya ditambahkan saat tiap modul
-    // dimigrasi ke Firestore. Apa pun yang tidak tercantum = DENY (aman).
+    // ===================== Catatan =====================
+    // `students`, `grades`, & `parent_links` sudah ter-cover di atas.
+    // UI akademik (Ortu/Guru) masih membaca RelationsService in-memory;
+    // migrasi view ke Firebase dilakukan terpisah. Apa pun yang tidak
+    // tercantum = DENY (aman).
   }
 }

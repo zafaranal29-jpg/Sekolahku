@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart' hide Page;
 
+import 'package:sekolahku/core/ids.dart';
 import 'package:sekolahku/core/theme.dart';
 import 'package:sekolahku/models/aduan.dart';
 import 'package:sekolahku/models/role.dart';
 import 'package:sekolahku/models/session.dart';
-import 'package:sekolahku/services/data_store.dart';
 import 'package:sekolahku/services/firebase_service.dart' as firebase_service;
 import 'package:sekolahku/services/notif_service.dart';
 import 'package:sekolahku/widgets/widgets.dart';
@@ -91,7 +91,7 @@ class _AduanFormState extends State<AduanForm> {
       if (!isAspirasi && who.text.trim().isNotEmpty) 'Pihak terkait: ${who.text.trim()}',
       body.text.trim(),
     ].join('\n');
-    final a = Aduan('AD-00${DataStore.i.aduanSeq++}', aduanKinds[kind], text, Session.name, anon,
+    final a = Aduan(shortId('AD'), aduanKinds[kind], text, Session.name, anon,
         'Baru', '');
     await firebase_service.FirebaseService.i.addAduan(a);
     if (!mounted) return;

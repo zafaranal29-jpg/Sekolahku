@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart' hide Page;
 
 import 'package:sekolahku/core/theme.dart';
+import 'package:sekolahku/models/mading.dart';
 import 'package:sekolahku/models/session.dart';
-import 'package:sekolahku/services/data_store.dart';
+import 'package:sekolahku/services/firebase_service.dart' as firebase_service;
 import 'package:sekolahku/widgets/widgets.dart';
 
 // Alat bantu khusus guru (dibuka dari tab Layanan).
@@ -66,10 +67,16 @@ class _StatusTerbacaState extends State<StatusTerbaca> {
   final reminded = <String>{};
   @override
   Widget build(BuildContext c) {
-    final mine = DataStore.i.madingData
-        .where((m) => m.owner == Session.name && m.kind == 'Pengumuman' && m.status == 'Disetujui')
-        .firstOrNull;
-    return Page('Status terbaca',
+    return StreamBuilder<List<Mading>>(
+      stream: firebase_service.FirebaseService.i.madingsStream(),
+      builder: (context, snap) {
+        final mine = (snap.data ?? const <Mading>[])
+            .where((m) =>
+                m.owner == Session.name &&
+                m.kind == 'Pengumuman' &&
+                m.status == 'Disetujui')
+            .firstOrNull;
+        return Page('Status terbaca',
         bottom: Btn('Ingatkan semua (20)', () {
           setState(() => reminded.addAll(names.map((n) => n.$1)));
           toast(c, 'Pengingat dikirim ke 20 siswa');
@@ -101,5 +108,7 @@ class _StatusTerbacaState extends State<StatusTerbaca> {
                         onPressed: () => setState(() => reminded.add(n.$1)),
                         child: const Text('Ingatkan'))),
         ]);
+      },
+    );
   }
 }

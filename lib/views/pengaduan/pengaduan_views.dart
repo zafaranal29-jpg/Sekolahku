@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart' hide Page;
 
+import 'package:sekolahku/core/ids.dart';
 import 'package:sekolahku/core/theme.dart';
 import 'package:sekolahku/models/complaint.dart';
 import 'package:sekolahku/models/role.dart';
 import 'package:sekolahku/models/session.dart';
-import 'package:sekolahku/services/data_store.dart';
 import 'package:sekolahku/services/firebase_service.dart' as firebase_service;
 import 'package:sekolahku/services/notif_service.dart';
+import 'package:sekolahku/widgets/photo_picker.dart';
 import 'package:sekolahku/widgets/widgets.dart';
 
 // ================= PENGADUAN FASILITAS =================
@@ -77,6 +78,7 @@ class BuatLaporan extends StatefulWidget {
 
 class _BuatLaporanState extends State<BuatLaporan> {
   int cat = 0;
+  String? photoUrl;
   final loc = TextEditingController(), title = TextEditingController(), desc = TextEditingController();
   @override
   void dispose() {
@@ -91,14 +93,15 @@ class _BuatLaporanState extends State<BuatLaporan> {
           bottom: Btn('Kirim laporan', () async {
             if (title.text.trim().isEmpty) return toast(c, 'Isi judul laporan');
             final x = Complaint(
-                'PF-00${DataStore.i.complaintSeq++}',
+                shortId('PF'),
                 title.text.trim(),
                 loc.text.trim().isEmpty ? 'Sekolah' : loc.text.trim(),
                 Session.name,
                 'Baru',
                 'Belum ditentukan',
                 '',
-                Session.name);
+                Session.name,
+                imageUrl: photoUrl);
             await firebase_service.FirebaseService.i.addComplaint(x);
             if (!c.mounted) return;
             NotifService.i.notify('🛠️', 'Pengaduan fasilitas baru', '${x.title} · oleh ${Session.name}',
@@ -116,10 +119,7 @@ class _BuatLaporanState extends State<BuatLaporan> {
             Field('Deskripsi', controller: desc, maxLines: 3),
             const Text('Foto bukti', style: TextStyle(color: kMuted, fontWeight: FontWeight.w700)),
             const SizedBox(height: 6),
-            OutlinedButton.icon(
-                onPressed: () => toast(c, 'Pilih foto (tambahkan image_picker di versi lanjut)'),
-                icon: const Icon(Icons.add_a_photo_outlined),
-                label: const Text('Tambah foto')),
+            PhotoPicker(folder: 'pengaduan', onChanged: (u) => setState(() => photoUrl = u)),
           ]);
 }
 
@@ -157,6 +157,16 @@ class DetailLaporan extends StatelessWidget {
   Widget build(BuildContext c) {
     final started = x.status != 'Baru';
     return Page('Detail laporan', [
+      if (x.imageUrl != null) ...[
+        ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: Image.network(x.imageUrl!, width: double.infinity, height: 180, fit: BoxFit.cover,
+              errorBuilder: (c, e, s) => const SizedBox(
+                  height: 100,
+                  child: Center(child: Text('⚠️ Gambar gagal dimuat')))),
+        ),
+        const SizedBox(height: 12),
+      ],
       Card2(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(x.title, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),

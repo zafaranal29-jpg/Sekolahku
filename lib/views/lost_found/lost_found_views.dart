@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart' hide Page;
 
+import 'package:sekolahku/core/ids.dart';
 import 'package:sekolahku/core/theme.dart';
 import 'package:sekolahku/models/lost_found.dart';
 import 'package:sekolahku/models/role.dart';
 import 'package:sekolahku/models/session.dart';
-import 'package:sekolahku/services/data_store.dart';
 import 'package:sekolahku/services/firebase_service.dart' as firebase_service;
 import 'package:sekolahku/services/notif_service.dart';
+import 'package:sekolahku/widgets/photo_picker.dart';
 import 'package:sekolahku/widgets/widgets.dart';
 
 // ================= LOST & FOUND =================
@@ -84,6 +85,16 @@ class DetailBarang extends StatelessWidget {
           child: Text(i.emoji, style: const TextStyle(fontSize: 90))),
       const SizedBox(height: 12),
       Text(i.name, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
+      if (i.imageUrl != null) ...[
+        const SizedBox(height: 12),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: Image.network(i.imageUrl!, width: double.infinity, height: 200, fit: BoxFit.cover,
+              errorBuilder: (c, e, s) => const SizedBox(
+                  height: 120,
+                  child: Center(child: Text('⚠️ Gambar gagal dimuat')))),
+        ),
+      ],
       Card2(
           child: Column(children: [
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
@@ -128,6 +139,7 @@ class PostingBarang extends StatefulWidget {
 class _PostingBarangState extends State<PostingBarang> {
   static const emojis = ['🎒', '🧴', '🎧', '📘', '👓', '📦'];
   int kind = 0, emo = 5;
+  String? photoUrl;
   final name = TextEditingController(), where = TextEditingController(), hidden = TextEditingController();
   @override
   void dispose() {
@@ -141,7 +153,7 @@ class _PostingBarangState extends State<PostingBarang> {
     if (name.text.trim().isEmpty) return toast(context, 'Isi nama barang');
     final isAdmin = Session.role == Role.admin;
     final it = LfItem(
-        'LB-00${++DataStore.i.lfSeq}',
+        shortId('LB'),
         emojis[emo],
         name.text.trim(),
         where.text.trim().isEmpty ? 'Sekolah' : where.text.trim(),
@@ -150,7 +162,8 @@ class _PostingBarangState extends State<PostingBarang> {
         roleLabel(Session.role),
         Session.name,
         kSoft,
-        isAdmin ? 'Aktif' : 'Menunggu validasi');
+        isAdmin ? 'Aktif' : 'Menunggu validasi',
+        imageUrl: photoUrl);
     await firebase_service.FirebaseService.i.addLfItem(it);
     if (!mounted) return;
     if (!isAdmin) {
@@ -176,10 +189,7 @@ class _PostingBarangState extends State<PostingBarang> {
         const SizedBox(height: 6),
         Chips(emojis, emo, (i) => setState(() => emo = i)),
         const SizedBox(height: 8),
-        OutlinedButton.icon(
-            onPressed: () => toast(c, 'Pilih foto (tambahkan image_picker di versi lanjut)'),
-            icon: const Icon(Icons.camera_alt_outlined),
-            label: const Text('Tambah foto barang')),
+        PhotoPicker(folder: 'lost_found', onChanged: (u) => setState(() => photoUrl = u)),
         const SizedBox(height: 12),
         Field('Nama barang', controller: name),
         Field('Lokasi', controller: where),
@@ -214,7 +224,7 @@ class _AjukanKlaimState extends State<AjukanKlaim> {
         Field('Ciri khas barang', controller: ciri, maxLines: 3),
         Btn('Kirim klaim', () async {
           if (ciri.text.trim().isEmpty) return toast(c, 'Tulis ciri khas barangnya');
-          final k = LfClaim('LF-00${DataStore.i.claimSeq++}', widget.i, Session.name,
+          final k = LfClaim(shortId('LF'), widget.i, Session.name,
               ciri.text.trim(), 'Menunggu');
           await firebase_service.FirebaseService.i.addLfClaim(k);
           if (!c.mounted) return;

@@ -6,6 +6,7 @@ class Session {
   static Role role = Role.siswa;
   static String name = 'Alex Johnson';
   static AppUser? user;
+  static String? nis; // NIS siswa yang sedang login (untuk akses nilainya)
 
   /// Nama ekskul yang diketuai pengguna ini (hanya siswa). Diatur admin.
   static String? get ketuaOf => role == Role.siswa ? user?.ketuaOf : null;

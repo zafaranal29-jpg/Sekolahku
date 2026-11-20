@@ -4,7 +4,8 @@ import 'package:sekolahku/core/theme.dart';
 import 'package:sekolahku/models/akademik.dart';
 import 'package:sekolahku/models/role.dart';
 import 'package:sekolahku/models/session.dart';
-import 'package:sekolahku/services/relations_service.dart';
+import 'package:sekolahku/services/academic_stats.dart';
+import 'package:sekolahku/services/firebase_service.dart' as firebase_service;
 import 'package:sekolahku/widgets/widgets.dart';
 
 /// Halaman Perkembangan Siswa: menampilkan riwayat nilai anak (Ortu)
@@ -18,16 +19,53 @@ class PerkembanganScreen extends StatefulWidget {
 }
 
 class _PerkembanganScreenState extends State<PerkembanganScreen> {
-  final RelationsService _svc = RelationsService.i;
-  late List<Student> _available;
+  final firebase_service.FirebaseService _fb = firebase_service.FirebaseService.i;
+  List<Student> _available = const [];
+  bool _loading = true;
   Student? _current;
   String _mapelFilter = 'Semua';
 
   @override
   void initState() {
     super.initState();
-    _available = _svc.studentsVisibleTo(role: Session.role, name: Session.name);
-    _current = widget.initialStudent ?? (_available.isNotEmpty ? _available.first : null);
+    _load();
+  }
+
+  /// Muat daftar siswa yang tampak untuk role yang sedang login.
+  Future<void> _load() async {
+    List<Student> students;
+    try {
+      final role = Session.role;
+      if (role == Role.ortu) {
+        final s = await _fb.getStudentForOrtu();
+        students = s == null ? const [] : [s];
+      } else if (role == Role.guru) {
+        final all = await _fb.students();
+        final rels = await _fb.guruRelations();
+        students = studentsForGuru(all, rels, Session.name);
+      } else if (role == Role.siswa) {
+        final nis = Session.nis;
+        if (nis == null) {
+          students = const [];
+        } else {
+          final s = await _fb.getStudent(nis);
+          students = s == null ? const [] : [s];
+        }
+      } else {
+        // Admin & koperasi melihat semua siswa.
+        students = await _fb.students();
+      }
+    } catch (e) {
+      debugPrint('PerkembanganScreen load: $e');
+      students = const [];
+    }
+    if (!mounted) return;
+    setState(() {
+      _available = students;
+      _current =
+          widget.initialStudent ?? (students.isNotEmpty ? students.first : null);
+      _loading = false;
+    });
   }
 
   Color _scoreColor(double v) {
@@ -44,10 +82,17 @@ class _PerkembanganScreenState extends State<PerkembanganScreen> {
 
   @override
   Widget build(BuildContext c) {
-    final s = _current;
     final isOrtu = Session.role == Role.ortu;
     final isGuru = Session.role == Role.guru;
 
+    if (_loading) {
+      return const Page('Perkembangan Siswa', [
+        SizedBox(height: 60),
+        Center(child: CircularProgressIndicator()),
+      ]);
+    }
+
+    final s = _current;
     if (s == null) {
       return const Page(
         'Perkembangan Siswa',
@@ -69,14 +114,14 @@ class _PerkembanganScreenState extends State<PerkembanganScreen> {
       );
     }
 
-    final allGrades = _svc.gradesOf(s.id);
+    final allGrades = sortGradesDesc(s.grades);
     final mapels = ['Semua', ...{for (final g in allGrades) g.mapel}];
     final filteredGrades = _mapelFilter == 'Semua'
         ? allGrades
         : allGrades.where((g) => g.mapel == _mapelFilter).toList();
-    final avg = _svc.averageOf(s.id);
-    final trend = _svc.trendOf(s.id);
-    final byMapel = _svc.averageByMapel(s.id);
+    final avg = averageOf(allGrades);
+    final trend = trendOf(allGrades);
+    final byMapel = averageByMapel(allGrades);
 
     return Page(
       'Perkembangan Siswa',

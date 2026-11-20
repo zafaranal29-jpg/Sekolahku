@@ -1,0 +1,12 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Foto diunggah user ke folder miliknya sendiri (`uploads/{uid}/...`).
+    // Penulis: hanya pemilik. Pembaca: siapa pun yang sudah login (karena
+    // foto mading/barang/pengaduan perlu dilihat user lain setelah terbit).
+    match /uploads/{userId}/{fileName} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}

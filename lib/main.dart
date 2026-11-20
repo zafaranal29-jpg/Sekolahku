@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import 'package:sekolahku/core/theme.dart';
 import 'package:sekolahku/firebase_options.dart';
+import 'package:sekolahku/services/firebase_service.dart' as firebase_service;
 import 'package:sekolahku/views/auth/auth_screen.dart';
 import 'package:sekolahku/views/home/role_gate.dart';
 
@@ -15,6 +16,17 @@ Future<void> main() async {
   } catch (e) {
     debugPrint('Firebase init error: $e');
   }
+
+  // First-run: buat admin pertama + seed data referensi awal (idempoten).
+  // Aman diulang — kalau admin sudah ada, langsung berhenti.
+  if (Firebase.apps.isNotEmpty) {
+    try {
+      await firebase_service.FirebaseService.i.bootstrapAdmin();
+    } catch (e) {
+      debugPrint('bootstrapAdmin error: $e');
+    }
+  }
+
   runApp(const SekolahKuApp());
 }
 

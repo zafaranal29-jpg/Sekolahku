@@ -48,7 +48,7 @@ void main() {
     expect(RoleGate.shellFor(Role.koperasi), isA<KoperasiShell>());
   });
 
-  testWidgets('PerkembanganScreen renders student grade history and averages',
+  testWidgets('PerkembanganScreen renders empty state without Firestore data',
       (tester) async {
     tester.view.physicalSize = const Size(1080, 2400);
     tester.view.devicePixelRatio = 1.0;
@@ -59,15 +59,14 @@ void main() {
 
     await tester.pumpWidget(const MaterialApp(home: PerkembanganScreen()));
     await tester.pump();
+    await tester.pump();
 
     expect(find.text('Perkembangan Siswa'), findsOneWidget);
-    expect(find.text('Alex Johnson'), findsWidgets);
-    expect(find.text('Rata-rata'), findsOneWidget);
-    expect(find.text('Riwayat Nilai'), findsOneWidget);
-    expect(find.text('Matematika'), findsWidgets);
+    expect(find.text('Data siswa tidak ditemukan'), findsOneWidget);
   });
 
-  testWidgets('OrtuShell renders read-only parent dashboard', (tester) async {
+  testWidgets('OrtuShell renders read-only parent dashboard (empty state)',
+      (tester) async {
     tester.view.physicalSize = const Size(1080, 2400);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(() => tester.view.resetPhysicalSize());
@@ -77,10 +76,10 @@ void main() {
 
     await tester.pumpWidget(const MaterialApp(home: OrtuShell()));
     await tester.pump();
+    await tester.pump();
 
-    expect(find.textContaining('Portal Orang Tua'), findsOneWidget);
-    expect(find.text('Read-only'), findsWidgets);
-    expect(find.text('Alex Johnson'), findsWidgets);
+    expect(find.textContaining('Selamat datang'), findsOneWidget);
     expect(find.text('Perkembangan Siswa'), findsWidgets);
+    expect(find.text('Pantau Nilai & Riwayat Belajar'), findsOneWidget);
   });
 }

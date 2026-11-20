@@ -6,9 +6,9 @@ import 'package:sekolahku/models/booking.dart';
 import 'package:sekolahku/models/complaint.dart';
 import 'package:sekolahku/models/lost_found.dart';
 import 'package:sekolahku/models/mading.dart';
+import 'package:sekolahku/models/report.dart';
 import 'package:sekolahku/models/role.dart';
 import 'package:sekolahku/models/user.dart';
-import 'package:sekolahku/services/data_store.dart';
 import 'package:sekolahku/services/firebase_service.dart' as firebase_service;
 import 'package:sekolahku/services/notif_service.dart';
 import 'package:sekolahku/views/aduan/aduan_views.dart';
@@ -81,32 +81,79 @@ class AdminDashboard extends StatelessWidget {
   Widget build(BuildContext c) {
     return StreamBuilder<List<AppUser>>(
       stream: firebase_service.FirebaseService.i.usersStream(),
-      builder: (context, snap) {
-        final users = snap.data ?? const <AppUser>[];
-        final active = users.where((u) => u.active).length;
-        final inactive = users.where((u) => !u.active).length;
+      builder: (context, uSnap) {
         return StreamBuilder<List<Mading>>(
           stream: firebase_service.FirebaseService.i.madingsStream(),
           builder: (context, mSnap) {
-            final pm = (mSnap.data ?? const <Mading>[])
-                .where((m) => m.status == 'Menunggu')
-                .length;
-            return _buildDashboard(c, active, inactive, pm);
+            return StreamBuilder<List<BookingReq>>(
+              stream: firebase_service.FirebaseService.i.bookingsStream(),
+              builder: (context, bSnap) {
+                return StreamBuilder<List<LfItem>>(
+                  stream: firebase_service.FirebaseService.i.lfItemsStream(),
+                  builder: (context, iSnap) {
+                    return StreamBuilder<List<LfClaim>>(
+                      stream: firebase_service.FirebaseService.i.lfClaimsStream(),
+                      builder: (context, kSnap) {
+                        return StreamBuilder<List<Complaint>>(
+                          stream: firebase_service.FirebaseService.i.complaintsStream(),
+                          builder: (context, cSnap) {
+                            return StreamBuilder<List<Aduan>>(
+                              stream: firebase_service.FirebaseService.i.aduansStream(),
+                              builder: (context, aSnap) {
+                                return StreamBuilder<List<Report>>(
+                                  stream: firebase_service.FirebaseService.i.reportsStream(),
+                                  builder: (context, rSnap) {
+                                    final users = uSnap.data ?? const <AppUser>[];
+                                    final mads = mSnap.data ?? const <Mading>[];
+                                    final bks = bSnap.data ?? const <BookingReq>[];
+                                    final lfis = iSnap.data ?? const <LfItem>[];
+                                    final lfcs = kSnap.data ?? const <LfClaim>[];
+                                    final cmps = cSnap.data ?? const <Complaint>[];
+                                    final adus = aSnap.data ?? const <Aduan>[];
+                                    final reps = rSnap.data ?? const <Report>[];
+                                    return _buildDashboard(
+                                      c,
+                                      active: users.where((u) => u.active).length,
+                                      inactive: users.where((u) => !u.active).length,
+                                      pm: mads.where((m) => m.status == 'Menunggu').length,
+                                      pb: bks.where((b) => b.status == 'Menunggu').length,
+                                      pl: lfis.where((x) => x.status == 'Menunggu validasi').length,
+                                      pk: lfcs.where((k) => k.status == 'Menunggu').length,
+                                      cmp: cmps.where((x) => x.status == 'Baru').length,
+                                      adu: adus.where((a) => a.status == 'Baru').length,
+                                      mod: reps.where((r) => r.status == 'open').length,
+                                    );
+                                  },
+                                );
+                              },
+                            );
+                          },
+                        );
+                      },
+                    );
+                  },
+                );
+              },
+            );
           },
         );
       },
     );
   }
 
-  Widget _buildDashboard(BuildContext c, int active, int inactive, int pm) {
-    final ds = DataStore.i;
-    final pb = ds.bookingRequests.where((b) => b.status == 'Menunggu').length;
-    final pl = ds.lfItems.where((x) => x.status == 'Menunggu validasi').length;
-    final pk = ds.lfClaims.where((k) => k.status == 'Menunggu').length;
+  Widget _buildDashboard(
+    BuildContext c, {
+    required int active,
+    required int inactive,
+    required int pm,
+    required int pb,
+    required int pl,
+    required int pk,
+    required int cmp,
+    required int adu,
+    required int mod,
+  }) {
     final approvals = pm + pb + pl + pk;
-    final cmp = ds.complaints.where((x) => x.status == 'Baru').length;
-    final adu = ds.aduans.where((a) => a.status == 'Baru').length;
-    final mod = ds.reports.where((r) => r.status == 'open').length;
     const chev = Icon(Icons.chevron_right, color: kMuted);
     return Page('Admin sekolah', back: false,
         action: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -724,48 +771,59 @@ class _ModerasiState extends State<ModerasiTab> {
   static const keys = ['open', 'hidden', 'ignored'];
   @override
   Widget build(BuildContext c) {
-    final list = DataStore.i.reports.where((r) => r.status == keys[f]).toList();
-    return Page('Moderasi konten', [
-      Chips(tabs, f, (i) => setState(() => f = i)),
-      if (list.isEmpty)
-        const Padding(
-            padding: EdgeInsets.all(40),
-            child: Center(child: Text('Tidak ada konten', style: TextStyle(color: kMuted)))),
-      for (final r in list)
-        Card2(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Emoji(r.emoji, bg: kSoft, size: 46),
-            const SizedBox(width: 12),
-            Expanded(
+    return StreamBuilder<List<Report>>(
+      stream: firebase_service.FirebaseService.i.reportsStream(),
+      builder: (context, snap) {
+        final list = (snap.data ?? const <Report>[])
+            .where((r) => r.status == keys[f])
+            .toList();
+        return Page('Moderasi konten', [
+          Chips(tabs, f, (i) => setState(() => f = i)),
+          if (list.isEmpty)
+            const Padding(
+                padding: EdgeInsets.all(40),
+                child: Center(
+                    child: Text('Tidak ada konten', style: TextStyle(color: kMuted)))),
+          for (final r in list)
+            Card2(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(r.title, style: const TextStyle(fontWeight: FontWeight.w700)),
-              Text(r.sub, style: const TextStyle(color: kMuted, fontSize: 12))
+              Row(children: [
+                Emoji(r.emoji, bg: kSoft, size: 46),
+                const SizedBox(width: 12),
+                Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(r.title, style: const TextStyle(fontWeight: FontWeight.w700)),
+                  Text(r.sub, style: const TextStyle(color: kMuted, fontSize: 12))
+                ])),
+                Pill('${r.count} laporan', bg: kRedBg, fg: kRed),
+              ]),
+              Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Text('“${r.quote}”', style: const TextStyle(color: kMuted))),
+              if (r.status == 'open')
+                Row(children: [
+                  Expanded(
+                      child: OutlinedButton(
+                          onPressed: () => firebase_service.FirebaseService.i
+                              .updateReportStatus(r, 'ignored'),
+                          child: const Text('Abaikan'))),
+                  const SizedBox(width: 8),
+                  Expanded(
+                      child: FilledButton(
+                          style: FilledButton.styleFrom(
+                              backgroundColor: const Color(0xFFF4566F)),
+                          onPressed: () => firebase_service.FirebaseService.i
+                              .updateReportStatus(r, 'hidden'),
+                          child: const Text('Sembunyikan'))),
+                ])
+              else if (r.status == 'hidden')
+                OutlinedButton(
+                    onPressed: () => firebase_service.FirebaseService.i
+                        .updateReportStatus(r, 'open'),
+                    child: const Text('Tampilkan kembali')),
             ])),
-            Pill('${r.count} laporan', bg: kRedBg, fg: kRed),
-          ]),
-          Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Text('“${r.quote}”', style: const TextStyle(color: kMuted))),
-          if (r.status == 'open')
-            Row(children: [
-              Expanded(
-                  child: OutlinedButton(
-                      onPressed: () => setState(() => r.status = 'ignored'),
-                      child: const Text('Abaikan'))),
-              const SizedBox(width: 8),
-              Expanded(
-                  child: FilledButton(
-                      style: FilledButton.styleFrom(
-                          backgroundColor: const Color(0xFFF4566F)),
-                      onPressed: () => setState(() => r.status = 'hidden'),
-                      child: const Text('Sembunyikan'))),
-            ])
-          else if (r.status == 'hidden')
-            OutlinedButton(
-                onPressed: () => setState(() => r.status = 'open'),
-                child: const Text('Tampilkan kembali')),
-        ])),
-    ]);
+        ]);
+      },
+    );
   }
 }

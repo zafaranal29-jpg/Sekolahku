@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart' hide Page;
 
 import 'package:sekolahku/controllers/cart_controller.dart';
+import 'package:sekolahku/core/ids.dart';
 import 'package:sekolahku/core/theme.dart';
 import 'package:sekolahku/models/order.dart';
 import 'package:sekolahku/models/product.dart';
 import 'package:sekolahku/models/role.dart';
 import 'package:sekolahku/models/session.dart';
-import 'package:sekolahku/services/data_store.dart';
 import 'package:sekolahku/services/firebase_service.dart' as firebase_service;
 import 'package:sekolahku/services/notif_service.dart';
 import 'package:sekolahku/views/notif/bell_button.dart';
@@ -218,7 +218,7 @@ class _PickupState extends State<PickupScreen> {
             return;
           }
           if (pay == 0) await firebase_service.FirebaseService.i.adjustSaldo(-total);
-          final id = 'KP-${DataStore.i.orderSeq++}';
+          final id = shortId('KP');
           await firebase_service.FirebaseService.i.addOrder(Order(
               id,
               Session.name,
@@ -256,8 +256,11 @@ class _PickupState extends State<PickupScreen> {
                   const SizedBox(width: 12),
                   Text(p, style: const TextStyle(fontWeight: FontWeight.w700)),
                   if (i == 0)
-                    Text('  ${rp(DataStore.i.saldo)}',
-                        style: const TextStyle(color: kMuted, fontSize: 12)),
+                    StreamBuilder<int>(
+                      stream: firebase_service.FirebaseService.i.mySaldoStream(),
+                      builder: (context, sSnap) => Text('  ${rp(sSnap.data ?? 0)}',
+                          style: const TextStyle(color: kMuted, fontSize: 12)),
+                    ),
                 ])),
         ]);
   }
@@ -536,7 +539,7 @@ class _KoperasiAdminState extends State<KoperasiAdminTab> {
                         padding: const EdgeInsets.all(16),
                         child: Column(children: [
                           const Text(
-                              'Di perangkat ini kamera QR belum dipasang. Masukkan kode dari ponsel pembeli (contoh: KP-0234).',
+                              'Di perangkat ini kamera QR belum dipasang. Masukkan kode dari ponsel pembeli (mis. KP-3F8K2QV9).',
                               style: TextStyle(color: kMuted, fontSize: 12)),
                           const SizedBox(height: 10),
                           Field('Kode pesanan', controller: code),

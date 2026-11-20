@@ -1,8 +1,6 @@
-import 'package:sekolahku/core/theme.dart';
 import 'package:sekolahku/models/role.dart';
 import 'package:sekolahku/models/user.dart';
 import 'package:sekolahku/services/firebase_service.dart';
-import 'package:sekolahku/services/notif_service.dart';
 
 /// Controller autentikasi aplikasi. Menghubungkan UI (AuthScreen) ke
 /// FirebaseService untuk autentikasi riil via Firebase Auth + Firestore.
@@ -27,19 +25,18 @@ class AuthService {
     required String email,
     required String password,
     String? studentNis,
-  }) async {
-    final user = await FirebaseService.i.register(
+  }) {
+    // Admin melihat akun nonaktif (menunggu aktivasi) langsung di tab
+    // Pengguna + angka dashboard. Tidak perlu notifikasi browser: aturan
+    // `notifications` hanya mengizinkan user AKTIF menulis, sedangkan
+    // pendaftar baru masih nonaktif (jadi notif di sini selalu gagal).
+    return FirebaseService.i.register(
       name: name,
       email: email,
       password: password,
       role: roleFromLabel(roleStr),
       studentNis: studentNis,
     );
-    // Beri tahu admin (dalam sesi berjalan) bahwa ada pendaftaran baru.
-    NotifService.i.notify('👥', 'Pendaftaran akun baru',
-        '${user.name} (${roleLabel(user.role)}) menunggu aktivasi',
-        bg: kYellowBg, roles: {Role.admin});
-    return user;
   }
 
   /// Login: verifikasi kredensial ke Firebase Auth, baca role dari

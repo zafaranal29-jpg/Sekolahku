@@ -2,11 +2,12 @@ import 'package:flutter/material.dart' hide Page;
 
 import 'package:sekolahku/core/theme.dart';
 import 'package:sekolahku/models/agenda.dart';
+import 'package:sekolahku/models/akademik.dart';
 import 'package:sekolahku/models/mading.dart';
 import 'package:sekolahku/models/role.dart';
 import 'package:sekolahku/models/session.dart';
+import 'package:sekolahku/services/academic_stats.dart';
 import 'package:sekolahku/services/firebase_service.dart' as firebase_service;
-import 'package:sekolahku/services/relations_service.dart';
 import 'package:sekolahku/views/akademik/perkembangan_screen.dart';
 import 'package:sekolahku/views/kalender/kalender_screen.dart';
 import 'package:sekolahku/views/mading/mading_views.dart';
@@ -67,16 +68,34 @@ class _OrtuShellState extends State<OrtuShell> {
       );
 }
 
-class OrtuHomeTab extends StatelessWidget {
+class OrtuHomeTab extends StatefulWidget {
   final VoidCallback onOpenPerkembangan;
   const OrtuHomeTab({super.key, required this.onOpenPerkembangan});
 
   @override
+  State<OrtuHomeTab> createState() => _OrtuHomeTabState();
+}
+
+class _OrtuHomeTabState extends State<OrtuHomeTab> {
+  Student? _anak;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final anak = await firebase_service.FirebaseService.i.getStudentForOrtu();
+    if (!mounted) return;
+    setState(() => _anak = anak);
+  }
+
+  @override
   Widget build(BuildContext c) {
-    final relSvc = RelationsService.i;
-    final anak = relSvc.getStudentForOrtu(Session.name);
-    final avg = anak != null ? relSvc.averageOf(anak.id) : 0.0;
-    final trend = anak != null ? relSvc.trendOf(anak.id) : '—';
+    final anak = _anak;
+    final avg = anak != null ? averageOf(anak.grades) : 0.0;
+    final trend = anak != null ? trendOf(anak.grades) : '—';
 
     return StreamBuilder<List<Mading>>(
       stream: firebase_service.FirebaseService.i.madingsStream(),
@@ -274,12 +293,31 @@ class _OrtuMadingTabState extends State<OrtuMadingTab> {
   }
 }
 
-class OrtuProfileTab extends StatelessWidget {
+class OrtuProfileTab extends StatefulWidget {
   const OrtuProfileTab({super.key});
 
   @override
+  State<OrtuProfileTab> createState() => _OrtuProfileTabState();
+}
+
+class _OrtuProfileTabState extends State<OrtuProfileTab> {
+  Student? _anak;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final anak = await firebase_service.FirebaseService.i.getStudentForOrtu();
+    if (!mounted) return;
+    setState(() => _anak = anak);
+  }
+
+  @override
   Widget build(BuildContext c) {
-    final anak = RelationsService.i.getStudentForOrtu(Session.name);
+    final anak = _anak;
 
     return Page('Profil Orang Tua', back: false, [
       Card2(

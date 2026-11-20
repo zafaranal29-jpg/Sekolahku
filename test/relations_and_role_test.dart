@@ -1,48 +1,53 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sekolahku/models/akademik.dart';
 import 'package:sekolahku/models/role.dart';
+import 'package:sekolahku/services/academic_stats.dart';
 import 'package:sekolahku/services/auth_service.dart';
-import 'package:sekolahku/services/relations_service.dart';
 
 void main() {
-  group('RelationsService & Data Modeling Test', () {
-    final svc = RelationsService.i;
+  group('Academic stats & data modeling (pure)', () {
+    final grades = [
+      GradeRecord('Matematika', 'UH 1', 'Ganjil 2026/2027', 85, DateTime(2026, 8, 15)),
+      GradeRecord('Matematika', 'UTS', 'Ganjil 2026/2027', 88, DateTime(2026, 9, 20)),
+      GradeRecord('Fisika', 'UH 1', 'Ganjil 2026/2027', 80, DateTime(2026, 8, 18)),
+    ];
 
-    test('Ortu is linked to specific Student ID (Alex Johnson - 2024-0153)', () {
-      final student = svc.getStudentForOrtu('Pak Hendra Johnson');
-      expect(student, isNotNull);
-      expect(student!.id, '2024-0153');
-      expect(student.name, 'Alex Johnson');
-      expect(student.kelas, 'XI IPA 3');
+    test('averageOf computes the mean', () {
+      expect(averageOf(grades), closeTo((85 + 88 + 80) / 3, 0.001));
+      expect(averageOf(const <GradeRecord>[]), 0);
     });
 
-    test('Guru is linked to Students by class and subjects', () {
-      final guruStudents = svc.getStudentsForGuru('Bu Rina Wulandari');
-      expect(guruStudents.isNotEmpty, isTrue);
-      // Bu Rina is wali kelas for XI IPA 3, so Alex (XI IPA 3) and Siti (XI IPA 3) must be in her list
-      expect(guruStudents.any((s) => s.id == '2024-0153'), isTrue);
-      expect(guruStudents.any((s) => s.id == '2024-0111'), isTrue);
+    test('averageByMapel groups by subject', () {
+      final byMapel = averageByMapel(grades);
+      final m = byMapel.where((e) => e.key == 'Matematika');
+      expect(m, isNotEmpty);
+      expect(m.first.value, closeTo((85 + 88) / 2, 0.001));
     });
 
-    test('Student grades and progress calculation', () {
-      final grades = svc.gradesOf('2024-0153');
-      expect(grades.isNotEmpty, isTrue);
-
-      final avg = svc.averageOf('2024-0153');
-      expect(avg, greaterThan(80.0));
-
-      final byMapel = svc.averageByMapel('2024-0153');
-      expect(byMapel.isNotEmpty, isTrue);
-      expect(byMapel.any((e) => e.key == 'Matematika'), isTrue);
-
-      final trend = svc.trendOf('2024-0153');
-      expect(trend.isNotEmpty, isTrue);
+    test('trendOf returns a label', () {
+      expect(trendOf(const <GradeRecord>[]), 'Stabil');
+      expect(trendOf(grades), isNotEmpty);
     });
 
-    test('Access control: Ortu can only see their specific child', () {
-      final visible = svc.studentsVisibleTo(
-          role: Role.ortu, name: 'Pak Hendra Johnson');
-      expect(visible.length, 1);
-      expect(visible.first.name, 'Alex Johnson');
+    test('studentsForGuru matches by wali kelas & mapel', () {
+      final alex = Student('2024-0153', 'Alex Johnson', 'XI IPA 3', [
+        GradeRecord('Matematika', 'UH 1', '', 85, DateTime(2026, 8, 15)),
+      ]);
+      final siti = Student('2024-0111', 'Siti Rahma', 'XI IPA 3', []);
+      final bella = Student('2024-0120', 'Bella Anindya', 'XI IPA 2', [
+        GradeRecord('Kimia', 'UH 1', '', 86, DateTime(2026, 8, 20)),
+      ]);
+      final rels = [
+        GuruRelation('Bu Rina Wulandari', waliKelas: 'XI IPA 3', mapel: const ['Matematika']),
+        GuruRelation('Bu Maya', mapel: const ['Kimia']),
+      ];
+
+      final rina = studentsForGuru([alex, siti, bella], rels, 'Bu Rina Wulandari');
+      expect(rina.any((s) => s.id == '2024-0153'), isTrue); // wali kelas
+      expect(rina.any((s) => s.id == '2024-0111'), isTrue); // sekelas wali
+
+      final maya = studentsForGuru([alex, siti, bella], rels, 'Bu Maya');
+      expect(maya.any((s) => s.id == '2024-0120'), isTrue); // diampu mapel Kimia
     });
 
     test('AuthService maps role labels to Role enum (non-Firebase)', () {

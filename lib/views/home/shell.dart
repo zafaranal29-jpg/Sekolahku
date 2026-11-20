@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart' hide Page;
 
 import 'package:sekolahku/core/theme.dart';
+import 'package:sekolahku/models/aduan.dart';
 import 'package:sekolahku/models/agenda.dart';
+import 'package:sekolahku/models/booking.dart';
+import 'package:sekolahku/models/complaint.dart';
+import 'package:sekolahku/models/lost_found.dart';
 import 'package:sekolahku/models/mading.dart';
 import 'package:sekolahku/models/order.dart';
 import 'package:sekolahku/models/role.dart';
 import 'package:sekolahku/models/session.dart';
-import 'package:sekolahku/services/data_store.dart';
 import 'package:sekolahku/services/firebase_service.dart' as firebase_service;
 import 'package:sekolahku/views/aduan/aduan_views.dart';
 import 'package:sekolahku/views/akademik/perkembangan_screen.dart';
@@ -283,47 +286,106 @@ class ServicesTab extends StatelessWidget {
   }
 }
 
+List<(String, String, String, String, Color)> _activityItems(
+  String me, {
+  required List<Order> orders,
+  required List<Complaint> complaints,
+  required List<Aduan> aduans,
+  required List<BookingReq> bookings,
+  required List<LfItem> items,
+  required List<LfClaim> claims,
+  required List<Mading> madings,
+}) => [
+      for (final o in orders.where((o) => o.owner == me))
+        ('🥪', 'Pesanan #${o.id}', 'Ambil ${o.slot}', o.status, kYellowBg),
+      for (final x in complaints.where((x) => x.owner == me))
+        ('🛠️', 'Laporan: ${x.title}', '#${x.id}', x.status, kRedBg),
+      for (final a in aduans.where((a) => a.owner == me))
+        ('🛡️', '${a.kind} #${a.id}', a.anon ? 'Anonim' : 'Dengan nama', a.status, kSoft),
+      for (final b in bookings.where((b) => b.owner == me))
+        ('🏟️', 'Booking ${b.facility}', b.when, b.status, kYellowBg),
+      for (final i in items.where((i) => i.owner == me))
+        ('🎒', 'Posting: ${i.name}', i.kind, i.status, kGreenBg),
+      for (final k in claims.where((k) => k.owner == me))
+        ('🧴', 'Klaim ${k.item.name}', '#${k.id}', k.status, kBlueBg),
+      for (final m in madings.where((m) => m.owner == me))
+        (m.emoji, '${m.kind}: ${m.title}', m.time, m.status, m.bg),
+    ];
+
 class ActivityTab extends StatelessWidget {
   const ActivityTab({super.key});
   @override
   Widget build(BuildContext c) {
     final me = Session.name;
-    final ds = DataStore.i;
-    final items = <(String, String, String, String, Color)>[
-      for (final o in ds.orders.where((o) => o.owner == me))
-        ('🥪', 'Pesanan #${o.id}', 'Ambil ${o.slot}', o.status, kYellowBg),
-      for (final x in ds.complaints.where((x) => x.owner == me))
-        ('🛠️', 'Laporan: ${x.title}', '#${x.id}', x.status, kRedBg),
-      for (final a in ds.aduans.where((a) => a.owner == me))
-        ('🛡️', '${a.kind} #${a.id}', a.anon ? 'Anonim' : 'Dengan nama', a.status, kSoft),
-      for (final b in ds.bookingRequests.where((b) => b.owner == me))
-        ('🏟️', 'Booking ${b.facility}', b.when, b.status, kYellowBg),
-      for (final i in ds.lfItems.where((i) => i.owner == me))
-        ('🎒', 'Posting: ${i.name}', i.kind, i.status, kGreenBg),
-      for (final k in ds.lfClaims.where((k) => k.owner == me))
-        ('🧴', 'Klaim ${k.item.name}', '#${k.id}', k.status, kBlueBg),
-      for (final m in ds.madingData.where((m) => m.owner == me))
-        (m.emoji, '${m.kind}: ${m.title}', m.time, m.status, m.bg),
-    ];
-    return Page('Aktivitas saya', back: false, [
-      if (items.isEmpty)
-        const Padding(
-            padding: EdgeInsets.all(40),
-            child: Center(
-                child: Text('Belum ada aktivitas', style: TextStyle(color: kMuted)))),
-      for (final a in items)
-        Card2(
-            child: Row(children: [
-          Emoji(a.$1, bg: a.$5),
-          const SizedBox(width: 12),
-          Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(a.$2, style: const TextStyle(fontWeight: FontWeight.w700)),
-            Text(a.$3, style: const TextStyle(color: kMuted, fontSize: 12)),
-          ])),
-          Pill.status(a.$4),
-        ])),
-    ]);
+    return StreamBuilder<List<Order>>(
+      stream: firebase_service.FirebaseService.i.ordersStream(),
+      builder: (context, oSnap) {
+        return StreamBuilder<List<Complaint>>(
+          stream: firebase_service.FirebaseService.i.complaintsStream(),
+          builder: (context, cSnap) {
+            return StreamBuilder<List<Aduan>>(
+              stream: firebase_service.FirebaseService.i.aduansStream(),
+              builder: (context, aSnap) {
+                return StreamBuilder<List<BookingReq>>(
+                  stream: firebase_service.FirebaseService.i.bookingsStream(),
+                  builder: (context, bSnap) {
+                    return StreamBuilder<List<LfItem>>(
+                      stream: firebase_service.FirebaseService.i.lfItemsStream(),
+                      builder: (context, iSnap) {
+                        return StreamBuilder<List<LfClaim>>(
+                          stream: firebase_service.FirebaseService.i.lfClaimsStream(),
+                          builder: (context, kSnap) {
+                            return StreamBuilder<List<Mading>>(
+                              stream: firebase_service.FirebaseService.i.madingsStream(),
+                              builder: (context, mSnap) {
+                                final items = _activityItems(me,
+                                    orders: oSnap.data ?? const <Order>[],
+                                    complaints: cSnap.data ?? const <Complaint>[],
+                                    aduans: aSnap.data ?? const <Aduan>[],
+                                    bookings: bSnap.data ?? const <BookingReq>[],
+                                    items: iSnap.data ?? const <LfItem>[],
+                                    claims: kSnap.data ?? const <LfClaim>[],
+                                    madings: mSnap.data ?? const <Mading>[]);
+                                return Page('Aktivitas saya', back: false, [
+                                  if (items.isEmpty)
+                                    const Padding(
+                                        padding: EdgeInsets.all(40),
+                                        child: Center(
+                                            child: Text('Belum ada aktivitas',
+                                                style: TextStyle(color: kMuted)))),
+                                  for (final a in items)
+                                    Card2(
+                                        child: Row(children: [
+                                      Emoji(a.$1, bg: a.$5),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                          child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                            Text(a.$2,
+                                                style:
+                                                    const TextStyle(fontWeight: FontWeight.w700)),
+                                            Text(a.$3,
+                                                style: const TextStyle(
+                                                    color: kMuted, fontSize: 12)),
+                                          ])),
+                                      Pill.status(a.$4),
+                                    ])),
+                                ]);
+                              },
+                            );
+                          },
+                        );
+                      },
+                    );
+                  },
+                );
+              },
+            );
+          },
+        );
+      },
+    );
   }
 }
 
@@ -333,7 +395,6 @@ class ProfileTab extends StatelessWidget {
   Widget build(BuildContext c) {
     final guru = Session.role == Role.guru;
     final me = Session.name;
-    final ds = DataStore.i;
     return Page('Profil', back: false, [
       Card2(
           padding: const EdgeInsets.all(18),
@@ -355,14 +416,40 @@ class ProfileTab extends StatelessWidget {
               ],
             ])),
           ])),
-      Card2(
-          child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
-        _Stat('${ds.orders.where((o) => o.owner == me).length}', 'Pesanan'),
-        _Stat(
-            '${ds.complaints.where((x) => x.owner == me).length + ds.aduans.where((a) => a.owner == me).length}',
-            'Laporan'),
-        _Stat('${ds.lfClaims.where((k) => k.owner == me).length}', 'Klaim'),
-      ])),
+      StreamBuilder<List<Order>>(
+        stream: firebase_service.FirebaseService.i.ordersStream(),
+        builder: (context, oSnap) {
+          return StreamBuilder<List<Complaint>>(
+            stream: firebase_service.FirebaseService.i.complaintsStream(),
+            builder: (context, cSnap) {
+              return StreamBuilder<List<Aduan>>(
+                stream: firebase_service.FirebaseService.i.aduansStream(),
+                builder: (context, aSnap) {
+                  return StreamBuilder<List<LfClaim>>(
+                    stream: firebase_service.FirebaseService.i.lfClaimsStream(),
+                    builder: (context, kSnap) {
+                      final orders = oSnap.data ?? const <Order>[];
+                      final cmps = cSnap.data ?? const <Complaint>[];
+                      final adus = aSnap.data ?? const <Aduan>[];
+                      final lfcs = kSnap.data ?? const <LfClaim>[];
+                      return Card2(
+                          child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceAround,
+                              children: [
+                            _Stat('${orders.where((o) => o.owner == me).length}', 'Pesanan'),
+                            _Stat(
+                                '${cmps.where((x) => x.owner == me).length + adus.where((a) => a.owner == me).length}',
+                                'Laporan'),
+                            _Stat('${lfcs.where((k) => k.owner == me).length}', 'Klaim'),
+                          ]));
+                    },
+                  );
+                },
+              );
+            },
+          );
+        },
+      ),
       for (final m in [
         ('✏️', 'Edit profil', 'Foto, nomor, email', kBlueBg, () => go(c, const EditProfile())),
         (
